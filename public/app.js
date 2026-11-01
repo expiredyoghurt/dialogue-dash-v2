@@ -67,7 +67,9 @@
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch {
-      throw new Error('Can’t reach the server. Check the internet connection and try again.');
+      const err = new Error('Can’t reach the server. Check the internet connection and try again.');
+      err.network = true;
+      throw err;
     }
     let data = null;
     try {
@@ -107,7 +109,49 @@
     flush();
     return frag;
   }
+  // Opens the handbook at one rule: as a pop-up during a route (so the route is not lost), or as the Handbook page.
+  function openRule(n) {
+    if (S.openRules) return S.openRules(n);
+    S.focusRule = n;
+    S.view = 'rules';
+    S.R = null;
+    render();
+  }
+  // Yours and the model side by side. Words that differ are marked by colour AND a mark (a wavy underline on yours, a
+  // solid underline and a plus on the model) and by hidden text for screen readers, never by colour alone.
+  function diffWords(a, b) {
+    const A = a.split(/\s+/).filter(Boolean);
+    const B = b.split(/\s+/).filter(Boolean);
+    const L = Array.from({ length: A.length + 1 }, () => new Array(B.length + 1).fill(0));
+    for (let i = A.length - 1; i >= 0; i--) for (let j = B.length - 1; j >= 0; j--) L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    const ya = new Set();
+    const yb = new Set();
+    let i = 0;
+    let j = 0;
+    while (i < A.length && j < B.length) {
+      if (A[i] === B[j]) { i++; j++; } else if (L[i + 1][j] >= L[i][j + 1]) ya.add(i++); else yb.add(j++);
+    }
+    while (i < A.length) ya.add(i++);
+    while (j < B.length) yb.add(j++);
+    return { A, B, ya, yb };
+  }
+  function compareBox(yours, model) {
+    const { A, B, ya, yb } = diffWords(String(yours || ''), String(model || ''));
+    const line = (words, bad, cls, note) => h('p', { class: 'cmp-line' }, words.map((w, k) => [k ? ' ' : '', bad.has(k) ? h('span', { class: cls }, mark(w), h('span', { class: 'sr' }, ' (' + note + ')')) : mark(w)]));
+    return h('div', { class: 'cmp' },
+      h('div', { class: 'cmp-row' }, h('b', { class: 'cmp-label' }, 'Yours'), line(A, ya, 'chg-del', 'different')),
+      h('div', { class: 'cmp-row' }, h('b', { class: 'cmp-label' }, 'The model'), line(B, yb, 'chg-add', 'changed here')),
+      h('p', { class: 'small muted', style: 'margin:6px 0 0' }, 'Wavy underline: something to change in yours. Solid underline with +: what the model has there.'));
+  }
   const errorBox = (m) => h('div', { class: 'error-msg', role: 'alert' }, m);
+  // Shown when sending an answer fails. The typed answer stays exactly where it is, and nothing (combo, tries)
+  // changes until the server has really received it, so one button is enough to try again.
+  function failBox(e, again) {
+    const net = !!(e && e.network);
+    return h('div', { class: 'error-msg net-fail', role: 'alert' },
+      h('p', { class: 'net-msg' }, net ? 'No signal. Your answer is safe. Try again when you are back online.' : (e && e.message) || 'Something went wrong. Please try again.'),
+      again ? h('button', { class: 'btn', type: 'button', onclick: () => again() }, 'Try again') : null);
+  }
   function errorList(errors) {
     return h(
       'ul',
@@ -119,6 +163,7 @@
           ruleChip(e.rule),
           h('p', { class: 'what' }, e.what),
           e.fix ? h('p', { class: 'fix' }, h('b', null, 'Fix: '), e.fix) : null,
+          e.rule > 0 && RULE_NAMES()[e.rule] ? h('button', { class: 'btn ghost small rule-link', type: 'button', onclick: () => openRule(e.rule) }, 'Read rule ' + e.rule + ' in the handbook') : null,
         ),
       ),
     );
@@ -135,6 +180,7 @@
   // ---------- auth ----------
   function signOut(msg) {
     store.del('dd_token');
+    resetComfort();
     S.token = null;
     S.me = null;
     S.pupil = null;
@@ -152,6 +198,20 @@
     S.view = 'home';
     await loadMe();
     render();
+  }
+
+  // A join link (/?class=CODE, from a teacher's class sheet or QR code) fills in the class code.
+  function joinCode() {
+    try {
+      return (new URLSearchParams(location.search).get('class') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+    } catch {
+      return '';
+    }
+  }
+  // "Not you?" on a shared computer: sign out, forget the name, keep the class code, so the next pupil types only their own username.
+  function switchPupil() {
+    store.del('dd_user');
+    signOut('');
   }
 
   function authView() {
@@ -175,7 +235,7 @@
         )
       : (() => {
           const u = h('input', { type: 'text', id: 'u', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', value: store.get('dd_user') || '', required: true });
-          const c = h('input', { type: 'text', id: 'c', class: 'code-input', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', maxlength: '8', required: true });
+          const c = h('input', { type: 'text', id: 'c', class: 'code-input', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', maxlength: '8', required: true, value: joinCode() || store.get('dd_class') || '' });
           const btn = h('button', { class: 'btn', type: 'submit' }, 'Sign in');
           const f = h(
             'form',
@@ -185,6 +245,7 @@
               err.replaceChildren();
               try {
                 store.set('dd_user', u.value.trim());
+                store.set('dd_class', c.value.trim().toUpperCase());
                 await afterSignIn(await api('/login', { method: 'POST', body: { username: u.value, code: c.value } }));
               } catch (x) {
                 err.replaceChildren(errorBox(x.message));
@@ -263,7 +324,8 @@
   };
   function soundButton() {
     const on = Sfx.enabled();
-    return h('button', { class: 'iconbtn', type: 'button', id: 'soundbtn', 'aria-pressed': String(on), 'aria-label': 'Sound effects', title: on ? 'Sound on' : 'Sound off', onclick: () => {
+    const calm = comfort().calm; // calm mode keeps sound off
+    return h('button', { class: 'iconbtn', type: 'button', id: 'soundbtn', disabled: calm, 'aria-pressed': String(on), 'aria-label': 'Sound effects', title: calm ? 'Calm mode keeps sound off' : on ? 'Sound on' : 'Sound off', onclick: () => {
       Sfx.setEnabled(!Sfx.enabled());
       savePrefs({ sound: Sfx.enabled() });
       const nb = soundButton();
@@ -329,6 +391,11 @@
     const pr = S.me.prefs || {};
     if (typeof pr.sound === 'boolean') Sfx.setEnabled(pr.sound, { quiet: true });
     if (typeof pr.keys === 'boolean') store.set(KEYS_PREF, pr.keys ? '1' : '0');
+    const mine = { ...comfort() };
+    if (['m', 'l', 'xl'].includes(pr.text)) mine.text = pr.text;
+    for (const f of ['spacing', 'contrast', 'calm']) if (typeof pr[f] === 'boolean') mine[f] = pr[f];
+    store.set(COMFORT_KEY, JSON.stringify(mine));
+    applyComfort(mine);
   }
   // Saved a moment after the last change, so flicking a switch a few times is one request. A failure never
   // breaks the game: the choice still works on this device.
@@ -347,6 +414,58 @@
         UI.toast('Couldn’t save that to your account. It still works on this device.', { kind: 'error' });
       }
     }, 350);
+  }
+
+  // ---------- comfort settings ----------
+  // Text size, extra spacing, a high-contrast look and calm mode (no animation, no sound, no timer). They are
+  // saved on the account like the garage, and kept on this device only while someone is signed in, so the next
+  // pupil on a shared computer starts with the normal look.
+  const COMFORT_KEY = 'dd_comfort';
+  const COMFORT_DEFAULT = { text: 'm', spacing: false, contrast: false, calm: false };
+  const TEXT_STEPS = [['m', 'Normal'], ['l', 'Large'], ['xl', 'Extra large']];
+  function comfort() {
+    let c = {};
+    try {
+      c = JSON.parse(store.get(COMFORT_KEY) || '{}') || {};
+    } catch {}
+    return { text: TEXT_STEPS.some(([k]) => k === c.text) ? c.text : 'm', spacing: c.spacing === true, contrast: c.contrast === true, calm: c.calm === true };
+  }
+  function applyComfort(c = comfort()) {
+    const el = document.documentElement;
+    el.setAttribute('data-text', c.text);
+    if (c.spacing) el.setAttribute('data-spacing', 'wide');
+    else el.removeAttribute('data-spacing');
+    if (c.contrast) el.setAttribute('data-contrast', 'high');
+    else el.removeAttribute('data-contrast');
+    if (c.calm) el.setAttribute('data-calm', 'on');
+    else el.removeAttribute('data-calm');
+    if (window.DashSfx && DashSfx.setCalm) DashSfx.setCalm(c.calm);
+  }
+  function setComfort(patch) {
+    const next = { ...comfort(), ...patch };
+    store.set(COMFORT_KEY, JSON.stringify(next));
+    applyComfort(next);
+    savePrefs(patch);
+  }
+  function resetComfort() {
+    store.del(COMFORT_KEY);
+    applyComfort({ ...COMFORT_DEFAULT });
+  }
+  function comfortPanel() {
+    const c = comfort();
+    const sw = (key, label, hint) =>
+      h('label', { class: 'field comfort-row' },
+        h('input', { type: 'checkbox', checked: c[key], onchange: (e) => { setComfort({ [key]: e.target.checked }); if (key === 'calm') render(); } }),
+        h('span', null, h('b', null, label), hint ? h('span', { class: 'muted small', style: 'display:block' }, hint) : null));
+    return h('section', { class: 'panel', 'aria-labelledby': 'comfort-h' },
+      h('h2', { id: 'comfort-h', style: 'margin-top:0' }, 'Comfort'),
+      h('p', { class: 'muted small', style: 'margin-top:0' }, 'Make Dash Express easier on your eyes and ears. These follow you to any device.'),
+      h('div', { role: 'group', 'aria-label': 'Text size' },
+        h('p', { style: 'margin:0 0 6px' }, h('b', null, 'Text size')),
+        h('div', { class: 'seg textseg' }, TEXT_STEPS.map(([k, l], i) => h('button', { type: 'button', class: 'size-' + k, 'aria-pressed': String(c.text === k), onclick: () => { setComfort({ text: k }); render(); } }, l)))),
+      sw('spacing', 'Extra spacing', 'More space between lines, letters and words.'),
+      sw('contrast', 'High contrast', 'Stronger colours and thicker outlines.'),
+      sw('calm', 'Calm mode', 'No movement, no sounds and no timer.'));
   }
 
   // ---------- home ----------
@@ -483,6 +602,25 @@
     } }, last ? 'Finish route' : 'Next stop');
   }
 
+  // When feedback appears (right, wrong or an error), make sure it is on screen and not hidden behind the answer
+  // bar on a phone. On big screens, where it is already in view, nothing moves.
+  function revealFeedback(stage) {
+    if (typeof MutationObserver === 'undefined') return;
+    new MutationObserver((muts) => {
+      for (const m of muts) {
+        for (const n of m.addedNodes) {
+          if (n.nodeType !== 1) continue;
+          const el = n.matches('.result, .error-msg') ? n : n.querySelector('.result, .error-msg');
+          if (!el) continue;
+          const dock = document.querySelector('.dock:not([hidden])');
+          const covered = dock && getComputedStyle(dock).position === 'fixed' ? dock.getBoundingClientRect().height : 0;
+          const r = el.getBoundingClientRect();
+          if (r.top < 0 || r.top > window.innerHeight - covered - 80) el.scrollIntoView({ block: 'start' });
+          return;
+        }
+      }
+    }).observe(stage, { childList: true, subtree: true });
+  }
   function playView() {
     const R = S.R;
     if (R.i >= R.list.length) return R.practice ? summaryView() : receiptView();
@@ -492,6 +630,8 @@
     // On phones the main button (Check, Fix it, Continue) stays in reach while you scroll a long question.
     const act = stage.querySelector('.actions');
     if (act && !act.closest('.dock')) act.classList.add('sticky-actions');
+    revealFeedback(stage);
+    const coach = coachMarks(R);
     return h('div', { class: 'wrap' },
       h('div', { class: 'stagebar' },
         h('div', { class: 'grow' }, routeStrip()),
@@ -499,8 +639,29 @@
         h('button', { class: 'btn small alt', type: 'button', onclick: async () => { clearInterval(S.clockTimer); S.view = S.R && S.R.practice ? 'practice' : 'home'; S.R = null; try { await loadMe(); } catch {} render(); } }, 'Quit'),
       ),
       rulesDlg,
+      coach,
       stage,
     );
+  }
+
+  // The very first route: three short tips, one per stop, that can be hidden for good. "Replay Dot's intro" under Me brings them back.
+  const coachKey = () => 'dd_coach_' + (S.pupil ? S.pupil.id : 0);
+  function coachMarks(R) {
+    if (R.practice || R.kind !== 'route' || !S.me || S.me.routes > 0 || store.get(coachKey())) return null;
+    const tips = [
+      'Read the sentence, then type or tap your answer and press Check.',
+      'Right first time? That builds a combo. Combos earn bigger tips.',
+      'Keep your combo going. If you slip, you can try again.',
+    ];
+    if (R.i >= tips.length) {
+      store.set(coachKey(), '1');
+      return null;
+    }
+    const box = h('div', { class: 'coach', role: 'note' },
+      h('span', { class: 'coach-n', 'aria-hidden': 'true' }, R.i + 1 + '/' + tips.length),
+      h('span', { class: 'grow' }, h('b', null, 'Dot’s tip: '), tips[R.i]),
+      h('button', { class: 'btn ghost small', type: 'button', onclick: () => { store.set(coachKey(), '1'); box.remove(); } }, 'Hide tips'));
+    return box;
   }
 
   function summaryView() {
@@ -613,7 +774,7 @@
           finishQuestion(false, 0);
           lock();
           showAnswer(r.reveal, false);
-          fb.replaceChildren(h('div', { class: 'result bad' }, h('h3', null, 'Here’s the answer'), h('p', { style: 'margin:0' }, 'Compare it with yours. This one is saved in Redeliveries so you can try it again.'), r.errors && r.errors.length ? errorList(r.errors) : null, tipLine(r.tip)), h('div', { class: 'actions' }, nextBtn()));
+          fb.replaceChildren(h('div', { class: 'result bad' }, h('h3', null, 'Here’s the answer'), h('p', { style: 'margin:0' }, 'Compare it with yours. This one is saved in Redeliveries so you can try it again.'), lines ? null : compareBox(ta.value, r.reveal), r.errors && r.errors.length ? errorList(r.errors) : null, tipLine(r.tip)), h('div', { class: 'actions' }, nextBtn()));
         } else {
           const n = r.errors.length;
           fb.replaceChildren(h('div', { class: 'result bad' }, h('h3', null, 'Not quite — ' + n + (n === 1 ? ' thing to fix' : ' things to fix')), errorList(r.errors), h('p', { class: 'small muted', style: 'margin:10px 0 0' }, 'Fix your sentence above and check again. Try ' + (tryNo + 1) + ' of 3.')));
@@ -623,7 +784,7 @@
           ta.focus();
         }
       } catch (e) {
-        fb.replaceChildren(errorBox(e.message));
+        fb.replaceChildren(failBox(e, () => send(payload)));
       } finally {
         check.disabled = false;
         show.disabled = false;
@@ -795,12 +956,12 @@
             );
             actions.replaceChildren(nextBtn());
           } catch (e) {
-            fb.replaceChildren(errorBox(e.message));
+            fb.replaceChildren(failBox(e, () => fixBtn.click()));
             fixBtn.disabled = false;
           }
         });
       } catch (e) {
-        fb.replaceChildren(errorBox(e.message));
+        fb.replaceChildren(failBox(e, () => spotBtn.click()));
         spotBtn.disabled = false;
       }
     });
@@ -867,7 +1028,7 @@
           input.focus();
         }
       } catch (e) {
-        fb.replaceChildren(errorBox(e.message));
+        fb.replaceChildren(failBox(e, () => send(giveUp)));
       } finally {
         check.disabled = false;
       }
@@ -954,7 +1115,7 @@
         tryNo++;
         refresh();
       } catch (e) {
-        fb.replaceChildren(errorBox(e.message));
+        fb.replaceChildren(failBox(e, () => check.click()));
         refresh();
       }
     });
@@ -1010,7 +1171,7 @@
           ta.focus();
         }
       } catch (e) {
-        fb.replaceChildren(errorBox(e.message));
+        fb.replaceChildren(failBox(e, () => send(payload)));
       } finally {
         check.disabled = false;
         show.disabled = false;
@@ -1108,7 +1269,7 @@
         chosen = -1;
         fb.replaceChildren(h('div', { class: 'result bad' }, h('h3', null, 'Not that one'), h('p', { style: 'margin:0' }, 'That word is fine. Find the verb that isn’t in the same time as the others. Try 2 of 2.')));
       } catch (e) {
-        fb.replaceChildren(errorBox(e.message));
+        fb.replaceChildren(failBox(e, () => tapBtn.click()));
         tapBtn.disabled = chosen < 0;
       }
     });
@@ -1137,7 +1298,7 @@
           fixBtn.disabled = false;
         }
       } catch (e) {
-        fb.replaceChildren(errorBox(e.message));
+        fb.replaceChildren(failBox(e, () => fixBtn.click()));
         fixBtn.disabled = false;
       }
     });
@@ -1156,12 +1317,19 @@
     return Object.keys(rules).map(Number).filter((n) => n > 0).sort((a, b) => a - b).map((n) => {
       const r = rules[n];
       if (!r) return null;
-      return h('section', { class: 'panel rule-card r' + n, style: compact ? 'box-shadow:none;margin-bottom:12px;padding:12px' : '' },
+      const d = S.me ? S.me.districts.find((x) => x.n === n) : null;
+      const canTry = !compact && d && d.unlocked && !d.empty;
+      return h('section', { class: 'panel rule-card r' + n, id: 'rule-' + n, tabindex: '-1', 'data-find': (r.title + ' ' + r.short + ' ' + r.tip + ' ' + distInfo(n).name + ' rule ' + n).toLowerCase(), style: compact ? 'box-shadow:none;margin-bottom:12px;padding:12px' : '' },
         h('div', { class: 'num', 'aria-hidden': 'true' }, n),
-        h('h3', null, 'Rule ' + n + ': ' + r.title),
-        h('p', { class: 'small', style: 'margin:0 0 4px' }, h('b', null, 'District: '), distInfo(n).name),
-        h('p', { class: 'muted small', style: 'margin:0' }, r.tip),
-        r.good ? h('div', { class: 'good pre' }, mark(r.good)) : null,
+        h('div', { class: 'rule-body' },
+          h('h3', null, 'Rule ' + n + ': ' + r.title),
+          h('p', { class: 'small', style: 'margin:0 0 4px' }, h('b', null, 'District: '), distInfo(n).name),
+          h('p', { class: 'muted small', style: 'margin:0' }, r.tip),
+          r.good ? [h('p', { class: 'small', style: 'margin:8px 0 2px' }, h('b', null, 'Example')), h('div', { class: 'good pre' }, mark(r.good))] : null,
+          compact ? null : canTry
+            ? h('button', { class: 'btn small', type: 'button', style: 'margin-top:10px', onclick: () => startRoute({ kind: 'route', district: n }) }, 'Try one in ' + distInfo(n).name)
+            : d && !d.empty ? h('p', { class: 'muted small', style: 'margin:10px 0 0' }, 'Opens at level ' + d.needLevel + '.') : null,
+        ),
       );
     });
   }
@@ -1173,10 +1341,46 @@
     dlg.addEventListener('click', (e) => {
       if (e.target === dlg) dlg.close();
     });
+    S.openRules = (n) => {
+      dlg.showModal();
+      const el = dlg.querySelector('#rule-' + n);
+      if (el) {
+        el.scrollIntoView({ block: 'start' });
+        el.focus({ preventScroll: true });
+      }
+    };
     return dlg;
   }
   function rulesView() {
-    return h('div', { class: 'wrap' }, h('h1', null, 'The Dash Express handbook'), h('p', { class: 'muted' }, 'One rule for every district. Coloured marks show the speech marks and punctuation.'), ruleCards(false));
+    const cards = ruleCards(false);
+    const list = h('div', null, cards);
+    const status = h('p', { class: 'muted small', role: 'status' }, '');
+    const box = h('input', { type: 'search', id: 'rule-find', placeholder: 'Search, like comma or capital', autocomplete: 'off', 'aria-label': 'Search the handbook' });
+    const find = () => {
+      const q = box.value.trim().toLowerCase();
+      let shown = 0;
+      for (const c of cards) {
+        if (!c) continue;
+        const hit = !q || c.getAttribute('data-find').includes(q);
+        c.hidden = !hit;
+        if (hit) shown++;
+      }
+      status.textContent = q ? (shown ? shown + (shown === 1 ? ' rule matches.' : ' rules match.') : 'No rule matches. Try another word.') : '';
+    };
+    box.addEventListener('input', find);
+    const wrap = h('div', { class: 'wrap' }, h('h1', null, 'The Dash Express handbook'), h('p', { class: 'muted' }, 'One rule for every district. Coloured marks show the speech marks and punctuation.'), h('label', { class: 'field' }, h('span', null, 'Find a rule'), box), status, list);
+    if (S.focusRule) {
+      const n = S.focusRule;
+      S.focusRule = null;
+      setTimeout(() => {
+        const el = wrap.querySelector('#rule-' + n);
+        if (el) {
+          el.scrollIntoView({ block: 'start' });
+          el.focus({ preventScroll: true });
+        }
+      }, 0);
+    }
+    return wrap;
   }
 
   // ---------- practice ----------
@@ -1220,10 +1424,12 @@
         h('div', { class: 'mehub' },
           h('button', { class: 'btn alt', type: 'button', onclick: () => { S.view = 'practice'; render(); } }, 'Redeliveries' + (me.wrong ? ' (' + me.wrong + ')' : '')),
           h('button', { class: 'btn alt', type: 'button', onclick: () => { S.view = 'rules'; render(); } }, 'Handbook'),
-          h('button', { class: 'btn alt', type: 'button', onclick: () => { S.view = 'garage'; render(); } }, 'Garage')),
+          h('button', { class: 'btn alt', type: 'button', onclick: () => { S.view = 'garage'; render(); } }, 'Garage'),
+          h('button', { class: 'btn alt', type: 'button', onclick: () => { store.del('dd_intro_' + S.pupil.id); store.del(coachKey()); S.view = 'home'; render(); } }, 'Replay Dot’s intro')),
         h('label', { class: 'field', style: 'flex-direction:row;align-items:center;gap:10px;margin-top:12px' },
-          h('input', { type: 'checkbox', checked: Sfx.enabled(), onchange: (e) => { Sfx.setEnabled(e.target.checked); savePrefs({ sound: e.target.checked }); const nb = soundButton(); const old = $('#soundbtn'); if (old) old.replaceWith(nb); } }),
-          h('span', null, 'Sound effects'))),
+          h('input', { type: 'checkbox', checked: Sfx.enabled(), disabled: comfort().calm, onchange: (e) => { Sfx.setEnabled(e.target.checked); savePrefs({ sound: e.target.checked }); const nb = soundButton(); const old = $('#soundbtn'); if (old) old.replaceWith(nb); } }),
+          h('span', null, comfort().calm ? 'Sound effects (calm mode keeps them off)' : 'Sound effects'))),
+      comfortPanel(),
       h('div', { class: 'statgrid' },
         h('div', { class: 'stat' }, h('b', null, me.xp), 'XP'),
         h('div', { class: 'stat' }, h('b', null, me.streak), me.streak === 1 ? 'day on the job' : 'days on the job'),
@@ -1337,7 +1543,7 @@
       h('section', { class: 'panel hero townhero' },
         h('div', { class: 'ride' }, myRide(150)),
         h('div', { class: 'grow' },
-          h('h1', null, 'Hi ' + (me.pupil.name.split(' ')[0] || 'there') + '!'),
+          h('h1', null, 'Hi ' + (me.pupil.name.split(' ')[0] || 'there') + '!', ' ', h('button', { class: 'btn ghost small notyou', type: 'button', onclick: switchPupil }, 'Not you? Switch')),
           h('div', { class: 'row' },
             h('span', { class: 'chip lvl' }, 'Level ' + lv.level),
             h('span', { class: 'chip' }, rk.name),
@@ -1490,7 +1696,7 @@
     const at = Math.min(R.i + (R.results[R.i] ? 1 : 0), n);
     const left = n > 1 ? (at / n) * 100 : 0;
     const big = R.kind === 'big';
-    const clockOn = !!(S.me.settings && S.me.settings.clock) && !R.practice;
+    const clockOn = !!(S.me.settings && S.me.settings.clock) && !R.practice && !comfort().calm;
     const strip = h('div', { class: 'strip', id: 'strip' },
       h('div', { class: 'road', role: 'img', 'aria-label': 'Stop ' + Math.min(R.i + 1, n) + ' of ' + n },
         h('div', { class: 'rider', style: 'left:calc(' + left + '% * 0.86)' }, myRide(54)),
@@ -1557,6 +1763,33 @@
     render();
   }
 
+  // A short, happy pause for big moments: a new ride, level, rank or district. Tap to carry on. Calm mode and
+  // reduced-motion users get the same screen without the movement (see the CSS).
+  function momentsDialog(moments) {
+    let i = 0;
+    const dlg = h('dialog', { 'aria-label': 'Good news', class: 'moment' });
+    const draw = () => {
+      const m = moments[i];
+      const last = i === moments.length - 1;
+      dlg.replaceChildren(
+        h('div', { class: 'moment-art', 'aria-hidden': 'true' }, m.art || Art.dotSvg(84)),
+        h('h2', { class: 'moment-title' }, m.title),
+        h('p', { class: 'moment-text' }, m.text),
+        h('div', { class: 'row', style: 'margin-top:14px;justify-content:center' },
+          h('span', { class: 'muted small', style: 'align-self:center' }, moments.length > 1 ? (i + 1) + ' of ' + moments.length : ''),
+          h('button', { class: 'btn big', type: 'button', onclick: () => { if (last) dlg.close(); else { i++; draw(); const b = dlg.querySelector('.btn'); if (b) b.focus(); } } }, last ? 'Great!' : 'Next')),
+      );
+    };
+    draw();
+    dlg.addEventListener('close', () => setTimeout(() => dlg.remove(), 0));
+    setTimeout(() => {
+      try {
+        dlg.showModal();
+      } catch {}
+    }, 120);
+    return dlg;
+  }
+
   // ----- the receipt -----
   function receiptView() {
     const R = S.R;
@@ -1576,8 +1809,8 @@
     }
     const title = big ? (run.passed ? 'Customer delighted!' : 'Customer not happy yet') : run.stars === 3 ? 'Perfect route!' : run.stars ? 'Route complete!' : 'Route finished';
     const line = big
-      ? run.passed ? 'The Big Delivery is done. The Smudge didn’t stand a chance.' : 'That customer ran out of patience. Have another go when you’re ready.'
-      : run.stars === 3 ? 'Every parcel delivered. Not a smudge in sight.' : run.stars ? 'Nice work, courier. A few parcels fought back, but you got them there.' : 'Rough road today. Try the same district again, one stop at a time.';
+      ? run.passed ? 'The Big Delivery is done. The Smudge lost this time.' : 'That customer waited too long. Have another go when you’re ready.'
+      : run.stars === 3 ? 'Every parcel delivered. Not one smudge.' : run.stars ? 'Nice work, courier. A few parcels were tricky, but you got them there.' : 'That was a bumpy road. Try the same district again, one stop at a time.';
     const nowIds = new Set(me.districts.filter((d) => d.cleared && !d.empty).map((d) => d.n));
     const wasIds = new Set((R.before || []).filter((d) => d.cleared && !d.empty).map((d) => d.n));
     const newlyCleared = [...nowIds].filter((n) => !wasIds.has(n));
@@ -1587,11 +1820,23 @@
     const rideUp = me.vehicle.index > (R.vehicleBefore || 0);
     const levelUp = me.level.level > (R.levelBefore || me.level.level);
     const costly = run.costlyRule;
+    const moments = [];
+    if (rideUp) moments.push({ title: 'New ride!', text: 'You’ve got a ' + me.vehicle.name.toLowerCase() + ' now.', art: myRide(150) });
+    if (levelUp) moments.push({ title: 'Level ' + me.level.level + '!', text: 'You went up a level. Keep delivering!' });
+    if (rankUp) moments.push({ title: 'New rank', text: 'You are now a ' + me.rank.name + '.' });
+    if (newlyCleared.length) moments.push({ title: 'District cleared!', text: newlyCleared.map((n) => distInfo(n).name).join(' and ') + ' is all delivered.' });
+    if (newlyOpen.length) moments.push({ title: 'New in town!', text: newlyOpen.map((d) => distInfo(d.n).name).join(' and ') + (newlyOpen.length === 1 ? ' is' : ' are') + ' open now.' });
+    let momentDlg = null;
+    if (moments.length && !R.momentsShown) {
+      R.momentsShown = true;
+      momentDlg = momentsDialog(moments);
+    }
     const home = (d) => me.districts.find((x) => x.n === d);
     const again = !big || run.passed ? 'Another route' : 'Try again';
     const dist = R.district ? home(R.district) : null;
     const canAgain = R.kind === 'mode' || R.kind === 'rush' || (dist && dist.unlocked);
     return h('div', { class: 'wrap' },
+      momentDlg,
       h('section', { class: 'panel receipt' },
         h('div', { class: 'rhead' }, h('span', { class: 'tag' }, big ? distInfo(R.district).name + ' · Big Delivery' : R.kind === 'rush' ? 'Rush Hour' : R.kind === 'mode' ? 'Depot job' : distInfo(R.district).name), h('h1', null, title), big ? null : Art.starsRow(run.stars, 38)),
         dotSays(h('p', { style: 'margin:0' }, line)),
@@ -1607,7 +1852,7 @@
         levelUp ? h('div', { class: 'banner good' }, h('b', null, 'Level up! '), 'You’re level ' + me.level.level + ' now.') : null,
         rankUp ? h('div', { class: 'banner good' }, h('b', null, 'New rank: ' + me.rank.name + '!')) : null,
         rideUp ? h('div', { class: 'banner good' }, h('b', null, 'New ride! '), 'You’ve got a ' + me.vehicle.name.toLowerCase() + ' now.', h('span', { class: 'ride' }, myRide(90))) : null,
-        costly && run.right < run.total + 1 && (R.slips || run.first < run.total) ? h('p', { class: 'small' }, 'Costliest rule this route: ', ruleChip(costly), ' ', home(costly) && home(costly).unlocked && !home(costly).empty ? h('button', { class: 'btn small alt', type: 'button', onclick: () => startRoute({ kind: 'route', district: costly }) }, 'Practise in ' + distInfo(costly).name) : null) : null,
+        costly && run.right < run.total + 1 && (R.slips || run.first < run.total) ? h('p', { class: 'small' }, 'The rule that cost you most: ', ruleChip(costly), ' ', home(costly) && home(costly).unlocked && !home(costly).empty ? h('button', { class: 'btn small alt', type: 'button', onclick: () => startRoute({ kind: 'route', district: costly }) }, 'Practise in ' + distInfo(costly).name) : null) : null,
         h('div', { class: 'actions' },
           canAgain ? h('button', { class: 'btn', type: 'button', onclick: () => startRoute({ kind: R.kind, district: R.district, mode: R.mode }) }, again) : null,
           big && run.passed ? null : null,
@@ -1621,6 +1866,7 @@
   // ---------- render ----------
   function render() {
     clearInterval(S.clockTimer);
+    if (S.view !== 'play') S.openRules = null;
     const scrollY = window.scrollY || 0;
     root.replaceChildren();
     document.body.classList.toggle('has-bottomnav', !!(S.token && S.me));
@@ -1691,6 +1937,7 @@
     render();
   }
   UI.watchOnline('You’re offline. Your answers can’t be saved until you’re back online.');
+  applyComfort();
   trackKeyboard();
   boot();
   // Lets the app be installed and open offline. It never touches /api/ (see sw.js).

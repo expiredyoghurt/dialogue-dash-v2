@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
+    <title>Dash Express · Style guide</title>
+    <link rel="stylesheet" href="/fonts.css" />
+    <link rel="stylesheet" href="/app.css" />
+    <style>
+      .sg h2 { margin: 28px 0 8px; }
+      .sg .demo { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
+      .sg .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+      .sg .sw { border: 2px solid var(--line); border-radius: 10px; padding: 8px; font-size: 0.85rem; }
+      .sg .sw i { display: block; height: 28px; border-radius: 6px; margin-bottom: 6px; border: 1px solid var(--hair); }
+      .sg .art { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+      .sg .dock { position: static; }
+    </style>
+  </head>
+  <body class="sg">
+    <a class="skip-link" href="#main">Skip to main content</a>
+    <main id="main" class="wrap" tabindex="-1" style="max-width: 880px; margin: 0 auto; padding: 16px">
+      <div class="brand"><span class="bubble-logo" aria-hidden="true">“”</span> Dash Express style guide</div>
+      <p class="muted">Every component in one place, with no data. Switch your device or browser to dark mode to check both themes. Not linked from anywhere.</p>
+
+      <h2>Colour tokens</h2>
+      <div class="swatches" id="tokens"></div>
+
+      <h2>Type</h2>
+      <div class="panel">
+        <h1 style="margin: 0 0 6px">Heading one</h1>
+        <h2 style="margin: 0 0 6px">Heading two</h2>
+        <h3 style="margin: 0 0 6px">Heading three</h3>
+        <p>Body text in Atkinson Hyperlegible. “Hello,” said Dot. “Your parcel is ready!”</p>
+        <p class="small muted">Small, muted text for hints.</p>
+      </div>
+
+      <h2>Buttons</h2>
+      <div class="demo">
+        <button class="btn" type="button">Check</button>
+        <button class="btn alt" type="button">Alt</button>
+        <button class="btn ghost" type="button">Ghost</button>
+        <button class="btn big" type="button">Big delivery</button>
+        <button class="btn danger" type="button">Danger</button>
+        <button class="btn" type="button" disabled>Disabled</button>
+        <button class="btn small" type="button">Small</button>
+        <span class="pill ok">ok</span><span class="pill warn">warn</span><span class="pill bad">bad</span>
+      </div>
+
+      <h2>Form controls</h2>
+      <div class="panel">
+        <label class="small">Username <input type="text" value="amy" /></label>
+        <label class="small">Pick one <select><option>Speech Mark Street</option><option>Comma Lane</option></select></label>
+        <label class="small"><input type="checkbox" checked /> Keep me signed in</label>
+        <textarea class="answer" rows="2" aria-label="Sample answer">“Come here,” said Mum.</textarea>
+      </div>
+
+      <h2>Speech bubbles and marks</h2>
+      <div class="bubble pre">“Where are you going” asked Ben.</div>
+      <div class="bubble good pre"><span class="pm-q">“</span>Where are you going<span class="pm-p">?</span><span class="pm-q">”</span> asked Ben.</div>
+
+      <h2>Rule chips</h2>
+      <div class="demo" id="chips"></div>
+
+      <h2>Feedback</h2>
+      <div class="result good"><h3>Correct! First try.</h3><span class="xp-pop">+10 XP</span><p class="tip-line"><b>Tip: </b>A comma goes before the closing speech mark.</p></div>
+      <div class="result bad"><h3>Not quite: 2 things to fix</h3>
+        <ul class="fb"><li><span class="rule r2"><b>2</b>Capitals</span><p class="what">The first word of speech needs a capital.</p><p class="fix"><b>Fix: </b>“Come here,” said Mum.</p></li></ul></div>
+      <div class="error-msg net-fail" role="alert"><p class="net-msg">No signal. Your answer is safe. Try again when you are back online.</p><button class="btn" type="button">Try again</button></div>
+
+      <h2>Choices</h2>
+      <div class="opts" role="group" aria-label="Sample choices">
+        <button type="button" class="opt" role="checkbox" aria-checked="false"><span class="box" aria-hidden="true"></span><span>“I’m late,” said Sam.</span></button>
+        <button type="button" class="opt" role="checkbox" aria-checked="true"><span class="box" aria-hidden="true"></span><span>“I’m late” said Sam.</span></button>
+      </div>
+
+      <h2>Spot the error tokens</h2>
+      <div class="flow"><span class="tok word" role="button" tabindex="0">“Come</span><span class="tok gap" role="button" tabindex="0">·</span><span class="tok word sel" role="button" tabindex="0">here</span><span class="tok word locked hit">said</span><span class="tok word locked miss">Mum</span></div>
+
+      <h2>Answer bar</h2>
+      <div class="dock"><div class="keyswrap"><div class="keys"><button type="button" class="btn small alt">“</button><button type="button" class="btn small alt">”</button><button type="button" class="btn small alt">,</button><button type="button" class="btn small alt">.</button><button type="button" class="btn small alt">?</button><button type="button" class="btn small alt">!</button></div></div><div class="actions"><button class="btn" type="button">Check</button><button class="btn ghost" type="button">Show me the answer</button></div></div>
+
+      <h2>Progress</h2>
+      <div class="bar thin" role="img" aria-label="60 percent done"><i style="width: 60%"></i></div>
+
+      <h2>Artwork</h2>
+      <div class="art" id="art"></div>
+
+      <h2>Panels and tables</h2>
+      <section class="panel"><h3 style="margin-top: 0">A panel</h3><p>Panels hold groups of content.</p>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>Pupil</th><th>Level</th><th>XP</th></tr></thead><tbody><tr><td>Amy</td><td>5</td><td>240</td></tr><tr><td>Ben</td><td>12</td><td>760</td></tr></tbody></table></div></section>
+    </main>
+    <script src="/art.js"></script>
+    <script>
+      (function () {
+        var names = ['ink', 'ink-2', 'page', 'panel', 'panel-2', 'hair', 'yellow', 'good', 'good-bg', 'bad', 'bad-bg', 'warn-bg', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'h0', 'h3', 'h6'];
+        var t = document.getElementById('tokens');
+        names.forEach(function (n) {
+          var d = document.createElement('div');
+          d.className = 'sw';
+          var i = document.createElement('i');
+          i.style.background = 'var(--' + n + ')';
+          d.append(i, '--' + n);
+          t.append(d);
+        });
+        var chips = document.getElementById('chips');
+        for (var n = 1; n <= 12; n++) {
+          var s = document.createElement('span');
+          s.className = 'rule r' + n;
+          var b = document.createElement('b');
+          b.textContent = n;
+          s.append(b, 'Rule ' + n);
+          chips.append(s);
+        }
+        var art = document.getElementById('art');
+        var A = window.DashArt;
+        try {
+          art.append(A.dotSvg(110));
+          ['foot', 'bike', 'scooter', 'van', 'truck', 'rocket'].forEach(function (v) { art.append(A.vehicleSvg(v, {}, 110)); });
+          [1, 2, 3].forEach(function (n) { art.append(A.buildingSvg(n, n === 1 ? 'done' : n === 2 ? 'open' : 'locked')); });
+          art.append(A.starsRow(3, 28));
+        } catch (e) {
+          art.textContent = 'Artwork could not be drawn: ' + e.message;
+        }
+      })();
+    </script>
+  </body>
+</html>

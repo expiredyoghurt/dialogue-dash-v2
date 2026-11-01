@@ -149,3 +149,9 @@ CREATE TABLE IF NOT EXISTS pupil_prefs (
   prefs TEXT NOT NULL DEFAULT '{}',          -- JSON: { garage: {paint, helmet, sticker}, sound: bool, keys: bool|null }
   updated_at INTEGER NOT NULL
 );
+
+-- 2.0.0: teachers must choose their own password after an account is created or reset.
+CREATE TABLE IF NOT EXISTS teacher_flags (
+  teacher_id INTEGER PRIMARY KEY,
+  must_change INTEGER NOT NULL DEFAULT 0
+);

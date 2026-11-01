@@ -5,6 +5,7 @@
   const KEY = 'dd_sound';
   let ctx = null;
   let on = true;
+  let calm = false; // calm mode keeps every sound quiet, whatever the sound switch says
   try {
     on = localStorage.getItem(KEY) !== '0';
   } catch {}
@@ -53,16 +54,19 @@
   };
 
   window.DashSfx = {
-    enabled: () => on,
+    enabled: () => on && !calm,
+    setCalm(v) {
+      calm = !!v;
+    },
     setEnabled(v, opts) {
       on = !!v;
       try {
         localStorage.setItem(KEY, on ? '1' : '0');
       } catch {}
-      if (on && !(opts && opts.quiet)) SOUNDS.tap();
+      if (on && !calm && !(opts && opts.quiet)) SOUNDS.tap();
     },
     play(name) {
-      if (!on || !SOUNDS[name]) return;
+      if (!on || calm || !SOUNDS[name]) return;
       try {
         SOUNDS[name]();
       } catch {} // sound is a nicety; never let it break the game

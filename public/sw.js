@@ -1,9 +1,10 @@
 /* Dash Express service worker: lets the pupil app be installed and open without a connection.
    It never touches /api/ (answers, sign-in and progress always go to the server), never caches the
    teacher console, and prefers the network so a new version shows up straight away when online. */
-const VERSION = '1.7.0';
+const VERSION = '2.0.0';
 const CACHE = 'dash-express-' + VERSION;
-const SHELL = ['/', '/app.css', '/app.js', '/ui.js', '/sfx.js', '/art.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/favicon.svg'];
+const FONTS = ['atkinson-hyperlegible-latin-400-normal', 'atkinson-hyperlegible-latin-400-italic', 'atkinson-hyperlegible-latin-700-normal', 'atkinson-hyperlegible-latin-700-italic', 'fredoka-latin-500-normal', 'fredoka-latin-600-normal', 'fredoka-latin-700-normal'].map((f) => '/fonts/' + f + '.woff2');
+const SHELL = ['/', '/app.css', '/fonts.css', ...FONTS, '/app.js', '/ui.js', '/sfx.js', '/art.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/favicon.svg'];
 const NETWORK_WAIT_MS = 4000; // on slow school wifi, fall back to the saved copy after this long
 
 self.addEventListener('install', (event) => {

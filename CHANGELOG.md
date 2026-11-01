@@ -1,5 +1,64 @@
 # Changelog
 
+## 2.0.0 — Teacher power
+
+**Before you deploy:** run `npm run db:flags:remote` (adds one small table, `teacher_flags`). The console still works if you forget; the first-sign-in password rule simply won't apply until it is run.
+
+**Console**
+- **Class switcher** in the header. It drives Dashboard, Classes, Districts and Analytics, and is remembered in this browser.
+- **Grouped side menu** on wide screens (Teach, Content, Admin); the same tabs along the top on phones. Arrow keys (up, down, left, right, Home, End) move between sections.
+- **Pupil panel.** Click any pupil's name (dashboard, classes, heat map) for level, rank, XP, each district with stars, slips by rule over 30 days, and the latest answers. Edit, reset, delete and **Print report** are there too. It never shows typed answers.
+- **Dashboard v2.** A 14-day XP line (with a text label), a **district heat map** (symbols as well as colour), sortable pupil columns, **Download CSV**, and suggestions: "Open districts 4–6" or "7–12" once a third of the class has reached the level, with **Undo**.
+- **Question bank.** Tick questions for bulk **Set district**, **Move to class** or **Remove** (with Undo), plus per-row **Copy** and **Preview** (what a pupil sees, answers hidden), and saved filters kept as chips. Sticky table header.
+- **Getting started** checklist and a one-button empty state for a teacher with no class.
+- **Phones.** Tables become labelled cards at 640px wide or less.
+- **Breadcrumbs** on the class page.
+
+**Accounts**
+- A new or reset teacher account must **choose its own password** on first sign-in; nothing else opens until they do. The new password can't equal the temporary one.
+- Password boxes have Show/Hide and a plain-words strength hint. The one-time password has **Copy password**. The Teachers list shows who still has to choose one.
+
+**Tests.** 174 server, 48 UI, 108 visual pictures (new: pupil panel, classes, question bank, forced password). Touch-target audit now also covers these screens.
+
+## 1.9.0 — Comfort settings, join links and QR codes, celebrations, clearer feedback, a better handbook
+
+**Pupils**
+- **Comfort** (under Me): text size (normal, large, extra large), extra line, letter and word spacing, a **high-contrast** look (light and dark), and **calm mode** (no movement, no sound, no delivery timer). They apply straight away, are saved on the account, and follow the pupil to any device. On sign-out they are cleared from the device, so the next pupil on a shared computer starts with the normal look. Calm mode turns the sound switches off and hides the timer, so a pupil in calm mode can't earn the speed bonus.
+- **Join links.** `/?class=CODE` opens the sign-in screen with the class code already filled in. The class code is remembered on the device; the username is not. **"Not you? Switch"** next to "Hi Amy!" signs out, forgets the name and keeps the class code, for shared computers.
+- **Celebrations.** A new ride, level, rank, district cleared or district opened now gets its own pop-up with Dot or the new vehicle, one tap to carry on. The banners stay on the receipt as a record. Calm mode and reduced-motion settings remove the movement.
+- **Clearer feedback.** When a typed answer is revealed, **Yours** and **The model** are shown one above the other with every different word marked by colour **and** a mark (wavy underline on yours; solid underline and a + on the model), plus hidden text for screen readers. Each missed rule has a **"Read rule N in the handbook"** button that opens the handbook at that rule without leaving the route. (The model is still never shown until the answer is revealed.)
+- **Handbook v2.** Search (type "comma" or "capital"), one card per rule with its district and an example, a number you can link to (`#rule-4` style anchors, used by the feedback buttons), and **Try one in <district>** to start a route there (or "Opens at level 20" if it is locked).
+- **First route.** Three short tips from Dot, one per stop, with "Hide tips" for good. **Replay Dot's intro** under Me brings the intro and tips back.
+- **Plainer words.** Idioms removed from the receipt ("fought back", "didn't stand a chance", "rough road", "costliest rule"), same meaning.
+
+**Teachers**
+- **Class join link and QR code.** On a class's **Sign-in cards**, a box shows the join link and a QR code, and every pupil card carries the same QR next to their username and the class code. Scanning it opens the sign-in screen with the code filled in; the pupil types only their own username. The QR is drawn in the browser (`public/qr.js`, the MIT-licensed qrcode-generator library); no data leaves the page.
+
+**Under the hood**
+- `pupil_prefs` now also holds `text`, `spacing`, `contrast`, `calm` (validated; unknown values are refused). **No database change**, nothing to run before deploying.
+- Body text is sized in `rem`, so the text-size choice scales everything.
+- Tests: 39 browser-simulation tests (8 new) and 169 server tests. 78 real-browser pictures, including the handbook, the reveal and the comfort settings.
+
+## 1.8.0 — Fonts we host ourselves, bigger touch targets, kinder network errors, and a real-browser check
+
+**Pupils**
+- **No signal? Your answer is safe.** If an answer can't be sent, the box keeps what was typed, a kind message says so, and one **Try again** button sends it. Nothing changes (tries, combo, XP) until the server has really received the answer, so a dropped connection can't cost a combo. This covers every question type.
+- **Feedback is always in view.** On a phone the answer bar sits at the bottom, and the "Not quite" or "Correct" box used to appear behind it. The page now scrolls so the feedback is on screen. On big screens nothing moves.
+- **Dark mode fixes.** "Sign out", "Remove" and every other plain (ghost) button were dark ink on a dark page and nearly invisible; red "danger" buttons had white text on light pink. Both are readable now, in the pupil app and the teacher console.
+- **Touch targets.** On touch screens every button, tab, select, text box, tick box and the sound button is at least 44 px. Words in "Spot the error" get a taller tap area (they stay as narrow as the word). Mouse users keep the compact sizes.
+
+**Teachers**
+- **Keyboard.** The section tabs are a proper tab list: arrow keys, Home and End move between them, Enter opens one. **/** jumps to the search box, **Esc** clears it. Console buttons and fields get the same 44 px touch targets.
+
+**Fonts and offline**
+- **Atkinson Hyperlegible and Fredoka are now served from our own files** (`public/fonts/`, SIL Open Font Licence, licences included). No request goes to Google, so school networks that block Google no longer fall back to plain system fonts, and the fonts are part of the offline copy. Fonts are cached for a year.
+
+**Under the hood**
+- **Style guide**: `/styleguide.html` (not linked) shows every component, in light and dark, with no data.
+- **Real-browser pictures**: `node test/visual/shots.mjs` starts the real Worker over a temporary database, opens Chromium at phone, tablet and laptop sizes in light and dark, and takes 60 pictures (town, typed question, feedback, Me, tap, choose-best, spot-the-error, teacher Dashboard and Game settings, style guide). It compares them with saved baselines (`--update` re-saves them) and, on phone and tablet, **measures every control and fails if one is under 44 px**. Needs `npm i` and `npx playwright install chromium`. Not part of `npm test`.
+- Tests: 6 new (answer retry, tab keyboard, fonts, service worker shell, style guide, dark-mode rules).
+- No database change. Nothing to run before deploying.
+
 ## 1.7.0 — Class dashboard, unlock grid, game settings, a better play screen, saved choices, install
 
 **Teachers**

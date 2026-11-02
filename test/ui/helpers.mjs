@@ -30,7 +30,7 @@ export function makeWorld() {
 
 // page: 'index.html' | 'teacher.html'
 export function mount(world, page, { pre } = {}) {
-  const scripts = page === 'index.html' ? ['ui.js', 'sfx.js', 'art.js', 'app.js'] : ['ui.js', 'teacher.js'];
+  const scripts = page === 'index.html' ? ['ui.js', 'sfx.js', 'art.js', 'app.js'] : ['ui.js', 'qr.js', 'teacher.js'];
   const html = readFileSync(PUBLIC + page, 'utf8').replace(/<script[^>]*><\/script>/g, '').replace(/<link[^>]*>/g, '');
   const dom = new JSDOM(html, { url: 'http://x/', runScripts: 'outside-only', pretendToBeVisual: true });
   pages.add(dom);

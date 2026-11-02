@@ -382,3 +382,36 @@ test('install: a button when the browser offers it, steps for iPhones, nothing o
   await sleep(80);
   assert.ok(!app.$('.install'), 'already installed: no panel');
 });
+
+test('a failed answer keeps what was typed, says so kindly, and one button sends it again without losing the combo', async () => {
+  const world = makeWorld();
+  onlyMode1(world);
+  const page = mount(world, 'index.html');
+  await signInAsGuest(page);
+  await finishIntro(page);
+  page.btn('Start').click();
+  // stop 1 right, so there is a combo to protect
+  await page.until(() => page.$('textarea.answer'), 'question 1');
+  answerRight(world, page);
+  page.btn('Check').click();
+  await page.until(() => page.btn('Next stop'), 'result 1');
+  page.btn('Next stop').click();
+  await sleep(60);
+  await page.until(() => page.$('textarea.answer') && !page.btn('Next stop'), 'question 2');
+  answerRight(world, page);
+  const typed = page.$('textarea.answer').value;
+  world.offline = true;
+  page.btn('Check').click();
+  await page.until(() => page.$('.net-fail'), 'the no-signal message');
+  assert.match(page.$('.net-fail').textContent, /No signal\. Your answer is safe/);
+  assert.equal(page.$('textarea.answer').value, typed, 'the typed answer is still there');
+  assert.ok(!page.$('textarea.answer').disabled, 'the box is still usable');
+  assert.ok(page.$('.net-fail [role], .net-fail button') && page.btn('Try again'), 'one button to try again');
+  world.offline = false;
+  page.btn('Try again').click();
+  await page.until(() => page.btn('Next stop'), 'the answer went through');
+  assert.match(page.text(), /Correct/);
+  assert.ok(!page.$('.net-fail'), 'the message is gone');
+  assert.match(page.$('#strip').textContent, /Combo/, 'the combo survived the blip');
+  assert.deepEqual(page.errors, []);
+});

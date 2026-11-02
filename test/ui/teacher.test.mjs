@@ -139,7 +139,7 @@ test('question bank: search, filter, sort and page through the whole bank', asyn
   const byLabel = (l) => page.$('select[aria-label="Filter: ' + l + '"]');
   byLabel('Type').value = '3';
   byLabel('Type').dispatchEvent(new page.w.Event('change'));
-  assert.ok(page.$$('tbody tr').every((r) => r.firstChild.textContent === 'M3'));
+  assert.ok(page.$$('tbody tr').every((r) => r.children[1].textContent === 'M3'));
   byLabel('Type').value = '0';
   byLabel('Type').dispatchEvent(new page.w.Event('change'));
   byLabel('District').value = '12';
@@ -275,7 +275,7 @@ test('the dashboard: how the class is getting on, who is quiet, who is stuck', a
   const page = await openConsole(world);
   await page.until(() => /Where the class is/.test(page.text()), 'the dashboard');
   assert.ok([...page.$$('nav.tabs button')][0].textContent.includes('Dashboard'), 'it is the first tab');
-  assert.equal([...page.$$('nav.tabs button')][0].getAttribute('aria-current'), 'page', 'and the one you land on');
+  assert.equal([...page.$$('nav.tabs button')][0].getAttribute('aria-selected'), 'true', 'and the one you land on');
   // classes are listed A to Z, so the first is 5 Honesty
   assert.match(page.text(), /1 of 2played this week/);
   assert.match(page.text(), /Levels 10 to 19/);
@@ -290,7 +290,7 @@ test('the dashboard: how the class is getting on, who is quiet, who is stuck', a
   sort.dispatchEvent(new page.w.Event('change'));
   assert.match(page.$$('tbody tr')[0].textContent, /Amy/);
   // a second class
-  const other = page.$('select[aria-label="Class"]');
+  const other = page.$('#ctx-class');
   other.value = String(world.db.prepare("SELECT id FROM classes WHERE name = '5 Integrity'").get().id);
   other.dispatchEvent(new page.w.Event('change'));
   await page.until(() => /No pupils in this class yet/.test(page.text()), 'the empty class');
@@ -300,9 +300,9 @@ test('the dashboard: how the class is getting on, who is quiet, who is stuck', a
 test('the dashboard has a friendly empty state', async () => {
   const world = makeWorld();
   const page = await openConsole(world);
-  await page.until(() => /Add a class on the Classes tab/.test(page.text()), 'the empty state');
-  page.btn('Go to Classes').click();
-  await page.until(() => page.btn('Create class'), 'the classes tab');
+  await page.until(() => /You don’t have a class yet/.test(page.text()), 'the empty state');
+  assert.ok(page.btn('Create your first class'));
+  assert.ok(!page.$('#ctx-class'), 'no class switcher with no classes');
 });
 
 test('the unlock grid: tick a district for a class and it saves on the spot', async () => {
@@ -349,6 +349,14 @@ test('a teacher account sees only their own classes and tools, and can make and 
 
   const page = mount(world, 'teacher.html');
   await signInForm(page, 'mstan', pw);
+  // a new account has to choose its own password before anything else
+  await page.until(() => page.$('dialog.forcepw[open]'), 'the forced password dialog');
+  assert.ok(!page.btn('Dashboard'), 'no console behind the password dialog');
+  const boxes = page.$$('dialog.forcepw input');
+  page.type(boxes[0], pw);
+  page.type(boxes[1], 'a-new-secret-77');
+  page.type(boxes[2], 'a-new-secret-77');
+  page.btn('Save my password').click();
   await page.until(() => page.btn('Change password'), 'the teacher console');
   assert.ok(!page.btn('Teachers') && !page.btn('Verb bank') && !page.btn('Game settings') && page.btn('My classes') && page.btn('Verb review') && page.btn('Dashboard'));
   assert.ok(!/admin\)/.test(page.text()));
@@ -414,4 +422,32 @@ test('accessibility basics hold on every console tab', async () => {
     await sleep(150);
     assert.deepEqual(a11yProblems(page), [], t);
   }
+});
+
+test('keyboard: arrow keys move between tabs, "/" finds the search box, Escape clears it', async () => {
+  const world = makeWorld();
+  const page = await openConsole(world);
+  const tabs = () => [...page.$$('[role=tab]')];
+  assert.ok(page.$('[role=tablist]'), 'a tablist');
+  assert.equal(page.$('#tab').getAttribute('role'), 'tabpanel');
+  assert.equal(tabs().filter((t) => t.getAttribute('tabindex') === '0').length, 1, 'only the current tab is in the tab order');
+  const key = (el, k) => el.dispatchEvent(new page.w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  tabs()[0].focus();
+  key(tabs()[0], 'ArrowRight');
+  assert.equal(page.w.document.activeElement, tabs()[1], 'right arrow moves to the next tab');
+  key(tabs()[1], 'ArrowLeft');
+  key(tabs()[0], 'ArrowLeft');
+  assert.equal(page.w.document.activeElement, tabs()[tabs().length - 1], 'it wraps round');
+  key(page.w.document.activeElement, 'Home');
+  assert.equal(page.w.document.activeElement, tabs()[0]);
+  // the questions tab has a search box
+  tabs().find((t) => t.textContent.trim() === 'Questions').click();
+  await page.until(() => page.$('input[type=search]'), 'the question search');
+  page.w.document.body.focus();
+  key(page.w.document.body, '/');
+  assert.equal(page.w.document.activeElement, page.$('input[type=search]'), '"/" jumps to the search');
+  page.type(page.$('input[type=search]'), 'comma');
+  key(page.$('input[type=search]'), 'Escape');
+  assert.equal(page.$('input[type=search]').value, '', 'Escape clears it');
+  assert.deepEqual(page.errors, []);
 });

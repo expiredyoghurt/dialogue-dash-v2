@@ -11,8 +11,11 @@ import { levelFor, xpForLevel, nextTier, allowedDistricts, tierLevel, ruleOf, va
 
 const SEEDS = ['questions-450.sql', 'seed-new-types.sql', 'seed-new-types-extra.sql'];
 const SECRETS = { teacher_user: 'admin', teacher_password: 'admin-pass-123' };
-const setup = () => {
+// Since 2.0 a new teacher must change their password before doing anything else. Most tests here are about what a
+// teacher may do afterwards, so by default they start as if that was done (`forced: true` keeps the real behaviour).
+const setup = ({ forced = false } = {}) => {
   const { db, d1 } = makeDb({ seeds: SEEDS });
+  if (!forced) db.exec('CREATE TRIGGER IF NOT EXISTS t_nomust AFTER INSERT ON teacher_flags BEGIN UPDATE teacher_flags SET must_change = 0 WHERE teacher_id = NEW.teacher_id; END');
   return { db, env: { DB: d1, ...SECRETS } };
 };
 const rows = (db) => db.prepare('SELECT id, mode, data, class_id FROM questions WHERE active = 1').all().map((r) => ({ ...r, data: JSON.parse(r.data) }));
@@ -222,7 +225,7 @@ test('the admin creates a teacher, who can sign in with the password shown once'
   assert.equal(await teacherSignIn(e, 'nobody', made.password), null);
   const list1 = (await call(e, ADMIN, 'GET', '/teachers')).body.teachers;
   assert.equal(list1.length, 1);
-  assert.deepEqual(Object.keys(list1[0]).sort(), ['active', 'classes', 'created_at', 'id', 'last_login', 'name', 'username']);
+  assert.deepEqual(Object.keys(list1[0]).sort(), ['active', 'classes', 'created_at', 'id', 'last_login', 'mustChange', 'name', 'username']);
 });
 
 test('usernames: the admin’s is reserved, duplicates and odd ones are refused', async () => {

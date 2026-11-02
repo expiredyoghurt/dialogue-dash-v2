@@ -4,8 +4,8 @@ import { CODES, TAGS, HIDDEN_CODES } from './rules.js';
 import { prepare, buildSlots, stripToPrompt, diffTokens, tokenize, normalizeText, displayText, describeSlot, checkMode1 } from './engine.js';
 import { saveVerb, writeForms, cleanTags, cleanWord, validWord, regularPast } from './verbs.js';
 import { ALL_MODES, validateMode1Extras, validateMode4, validateMode5, validateMode6, previewMode, cleanRule } from './modes.js';
-import { DISTRICTS, autoRule, ruleOf, isRule } from './districts.js';
-import { getSettings, saveSettings } from './express.js';
+import { DISTRICTS, autoRule, ruleOf, isRule, districtProgress } from './districts.js';
+import { getSettings, saveSettings, pupilAccess, pupilState } from './express.js';
 import { levelFor, validateBands, validateThresholds, vehicleFor, allowedDistricts, DEFAULT_BANDS } from './districts.js';
 import { rankFor, RANKS } from './rules.js';
 import { LEVEL_TIERS, DISTRICT_NUMS } from './districts.js';
@@ -131,6 +131,37 @@ async function dashboard(env, url, who) {
     if (level >= 20) reach20++;
     return { id: p.id, name: p.name, username: p.username, level, xp: total, rank: rankFor(total, settings.rankXp).name, lastActive: a.last || null, xp7: a.xp7 + r.tips7, attempts7: a.a7, routes7: r.r7, topSlip: topSlip(p.id) };
   });
+  // v2: where each pupil is in each district, and 14 days of class XP
+  let heat = {};
+  let xpDays = new Array(14).fill(0);
+  try {
+    const qs = ((await env.DB.prepare('SELECT id, mode, data FROM questions WHERE (class_id IS NULL OR class_id = ?1) AND active = 1').bind(classId).all()).results || []).map((q) => ({ id: q.id, mode: q.mode, data: parse(q.data, {}) }));
+    const ever = (await env.DB.prepare('SELECT pupil_id, question_id, MAX(correct) AS ok, MIN(correct) AS lo FROM attempts WHERE class_id = ?1 GROUP BY pupil_id, question_id').bind(classId).all()).results || [];
+    const lastBy = new Map();
+    for (const r of ever) {
+      const m = lastBy.get(r.pupil_id) || new Map();
+      m.set(r.question_id, { correct: !!r.ok, wrong: !r.ok });
+      lastBy.set(r.pupil_id, m);
+    }
+    let runsAll = [];
+    try {
+      runsAll = (await env.DB.prepare("SELECT pupil_id, kind, district, stars, passed FROM route_runs WHERE class_id = ?1").bind(classId).all()).results || [];
+    } catch {}
+    const runsBy = new Map();
+    for (const r of runsAll) runsBy.set(r.pupil_id, [...(runsBy.get(r.pupil_id) || []), r]);
+    for (const p of pupils) {
+      const dp = districtProgress(qs, lastBy.get(p.id) || new Map(), runsBy.get(p.id) || [], {});
+      heat[p.id] = dp.map((d) => [d.empty ? -1 : d.cleared ? 2 : d.done > 0 || d.stars > 0 ? 1 : 0, d.done, d.total]);
+    }
+    const since14 = now - 14 * DAY;
+    const bucket = (ts) => 13 - Math.min(13, Math.floor((now - ts) / DAY));
+    for (const r of (await env.DB.prepare('SELECT ts, xp FROM attempts WHERE class_id = ?1 AND ts >= ?2').bind(classId, since14).all()).results || []) xpDays[bucket(r.ts)] += r.xp;
+    try {
+      for (const r of (await env.DB.prepare('SELECT ts, bonus FROM route_runs WHERE class_id = ?1 AND ts >= ?2').bind(classId, since14).all()).results || []) xpDays[bucket(r.ts)] += r.bonus || 0;
+    } catch {}
+  } catch {
+    heat = {};
+  }
   const active = list.filter((p) => p.lastActive && p.lastActive >= d7);
   const stuck = list.filter((p) => p.topSlip && p.topSlip.n >= STUCK_AT).map((p) => ({ pupilId: p.id, name: p.name, rule: p.topSlip.rule, n: p.topSlip.n })).sort((x, y) => y.n - x.n);
   const quiet = list.filter((p) => !p.lastActive || p.lastActive < d7).map((p) => ({ pupilId: p.id, name: p.name, lastActive: p.lastActive }));
@@ -140,7 +171,8 @@ async function dashboard(env, url, who) {
     class: cls,
     since: d7,
     totals: { pupils: list.length, active7: active.length, quiet7: list.length - active.length, xp7: list.reduce((n, p) => n + p.xp7, 0), routes7: list.reduce((n, p) => n + p.routes7, 0), attempts7: list.reduce((n, p) => n + p.attempts7, 0) },
-    pupils: list,
+    pupils: list.map((p) => ({ ...p, districts: heat[p.id] || null })),
+    xpDays,
     levelCounts,
     reach: { 10: reach10, 20: reach20 },
     tierXp: settings.tierXp,
@@ -470,6 +502,36 @@ async function updatePupil(request, env, id) {
   return json({ ok: true });
 }
 
+// Everything about one pupil for the side panel: level and rank, each district, slips by rule, recent answers.
+async function pupilDetail(env, id) {
+  const p = await env.DB.prepare('SELECT id, name, username, class_id FROM pupils WHERE id = ?1 AND is_guest = 0').bind(id).first();
+  if (!p) throw new HttpError(404, 'Pupil not found.');
+  const cls = p.class_id ? await env.DB.prepare('SELECT name FROM classes WHERE id = ?1').bind(p.class_id).first() : null;
+  const rows = (await env.DB.prepare('SELECT question_id, mode, correct, xp, ts, codes, try_no FROM attempts WHERE pupil_id = ?1 ORDER BY id').bind(id).all()).results || [];
+  const xp = rows.reduce((n, r) => n + r.xp, 0);
+  const since = Date.now() - 30 * DAY;
+  const slips = new Map();
+  for (const r of rows) if (r.try_no === 1 && !r.correct && r.ts >= since) for (const rule of rulesOfCodes(r.codes)) slips.set(rule, (slips.get(rule) || 0) + 1);
+  const pp = { id: p.id, classId: p.class_id, guest: false };
+  const access = await pupilAccess(env, pp, { answerXp: xp });
+  const st = await pupilState(env, pp, { visible: { where: '(class_id IS NULL OR class_id = ?1) AND active = 1', binds: [p.class_id] }, rows, ruleErrors: {}, access });
+  const total = xp + st.tips;
+  return json({
+    pupil: { id: p.id, name: p.name, username: p.username, className: cls ? cls.name : '' },
+    level: access.level,
+    xp: total,
+    tips: st.tips,
+    routes: st.routes,
+    rank: rankFor(total, access.settings.rankXp).name,
+    vehicle: vehicleFor(total, access.settings.vehicleXp).name,
+    answers: rows.length,
+    lastActive: rows.length ? rows[rows.length - 1].ts : null,
+    districts: st.districts.filter((d) => !d.empty).map((d) => ({ n: d.n, done: d.done, total: d.total, stars: d.stars, cleared: d.cleared, unlocked: d.unlocked })),
+    slips: [...slips.entries()].map(([rule, n]) => ({ rule, n })).sort((a, b) => b.n - a.n),
+    recent: rows.slice(-12).reverse().map((r) => ({ ts: r.ts, mode: r.mode, correct: !!r.correct, tryNo: r.try_no, xp: r.xp })),
+  });
+}
+
 async function deletePupil(env, id) {
   await env.DB.batch([env.DB.prepare('DELETE FROM attempts WHERE pupil_id = ?1').bind(id), ...(await routeRunsDelete(env, 'pupil_id', id)), ...(await tableDelete(env, 'pupil_prefs', 'pupil_id', id)), env.DB.prepare('DELETE FROM pupils WHERE id = ?1').bind(id)]);
   return json({ ok: true });
@@ -625,6 +687,38 @@ async function previewQuestion(request) {
     if (e instanceof HttpError) return json({ ok: false, problem: e.message });
     throw e;
   }
+}
+
+// Remove, restore or move many questions at once. A removal is a soft delete (active = 0), so "restore" brings
+// the same questions back with their results. Teachers can only touch questions made for their own classes.
+async function bulkQuestions(request, env, who) {
+  const body = await readJson(request);
+  const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map((n) => int(n, 0)).filter(Boolean))].slice(0, 500);
+  const action = body.action;
+  if (!ids.length) throw new HttpError(400, 'Choose some questions first.');
+  if (!['remove', 'restore', 'move'].includes(action)) throw new HttpError(400, 'Unknown action.');
+  let target = null;
+  if (action === 'move') {
+    const to = await classScope(env, { class_id: body.class_id }, who);
+    target = to.classId;
+  }
+  const rows = (await env.DB.prepare(`SELECT id, class_id FROM questions WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all()).results || [];
+  const done = [];
+  const skipped = [];
+  const stmts = [];
+  for (const q of rows) {
+    try {
+      needEditable(who, q);
+    } catch {
+      skipped.push(q.id);
+      continue;
+    }
+    done.push(q.id);
+    if (action === 'move') stmts.push(env.DB.prepare('UPDATE questions SET class_id = ?1 WHERE id = ?2').bind(target, q.id));
+    else stmts.push(env.DB.prepare('UPDATE questions SET active = ?1 WHERE id = ?2').bind(action === 'restore' ? 1 : 0, q.id));
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+  return json({ ok: true, changed: done, skipped });
 }
 
 // Sets (or clears) the district of many questions at once. rule: 1-12, or null to go back to the suggestion.
@@ -848,6 +942,7 @@ export async function teacherRoute(request, env, url, who = ADMIN) {
     else needClass(who, p.class_id);
   };
   if (path === '/ping') return json({ ok: true });
+  if (who.mustChange && !(path === '/me' || path === '/me/password')) throw new HttpError(403, 'Please choose your own password first.');
   if (path === '/me' && m === 'GET') return whoAmI(env, who);
   if (path === '/me/password' && m === 'POST') return changeOwnPassword(request, env, who);
 
@@ -904,12 +999,17 @@ export async function teacherRoute(request, env, url, who = ADMIN) {
     if (m === 'PATCH') return updatePupil(request, env, +x[1]);
     if (m === 'DELETE') return deletePupil(env, +x[1]);
   }
+  if ((x = path.match(/^\/pupils\/(\d+)\/detail$/)) && m === 'GET') {
+    await pupilClass(+x[1]);
+    return pupilDetail(env, +x[1]);
+  }
   if ((x = path.match(/^\/pupils\/(\d+)\/reset$/)) && m === 'POST') {
     await pupilClass(+x[1]);
     return resetPupil(env, +x[1]);
   }
 
   if (path === '/questions') return m === 'GET' ? listQuestions(env, url, who) : m === 'POST' ? createQuestion(request, env, who) : null;
+  if (path === '/questions/bulk' && m === 'POST') return bulkQuestions(request, env, who);
   if (path === '/questions/preview' && m === 'POST') return previewQuestion(request);
   if (path === '/questions/import' && m === 'POST') return importQuestions(request, env, who);
   if (path === '/questions/rules' && m === 'POST') return setRules(request, env, who);

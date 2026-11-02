@@ -1,13 +1,16 @@
 // What a pupil chose for themselves: the look of their ride, sound on or off, punctuation keys.
 // Kept on the account so it follows them from the classroom computer to a tablet or phone.
 //
-//   { garage: { paint, helmet, sticker }, sound: true|false, keys: true|false|null }   (keys null = automatic)
+//   { garage: { paint, helmet, sticker }, sound: true|false, keys: true|false|null,   (keys null = automatic)
+//     text: 'm'|'l'|'xl', spacing: true|false, contrast: true|false, calm: true|false }   (comfort settings)
 //
 // Only these keys are ever stored, and a garage item must exist and be unlocked at the pupil's XP.
 
 import { COSMETICS } from './districts.js';
 import { HttpError, json, readJson } from './util.js';
 
+export const TEXT_SIZES = ['m', 'l', 'xl'];
+const COMFORT_FLAGS = ['spacing', 'contrast', 'calm'];
 const KINDS = [['paint', 'paints'], ['helmet', 'helmets'], ['sticker', 'stickers']];
 
 export function defaultGarage() {
@@ -31,6 +34,8 @@ export function readablePrefs(raw, xp) {
   }
   if (typeof p.sound === 'boolean') out.sound = p.sound;
   if (typeof p.keys === 'boolean') out.keys = p.keys;
+  if (TEXT_SIZES.includes(p.text)) out.text = p.text;
+  for (const f of COMFORT_FLAGS) if (typeof p[f] === 'boolean') out[f] = p[f];
   return out;
 }
 
@@ -56,6 +61,15 @@ export function cleanPrefsUpdate(body, xp) {
   if (body.keys !== undefined) {
     if (body.keys !== null && typeof body.keys !== 'boolean') throw new HttpError(400, 'Punctuation keys are on, off or automatic.');
     out.keys = body.keys;
+  }
+  if (body.text !== undefined) {
+    if (!TEXT_SIZES.includes(body.text)) throw new HttpError(400, 'Text size is normal, large or extra large.');
+    out.text = body.text;
+  }
+  for (const f of COMFORT_FLAGS) {
+    if (body[f] === undefined) continue;
+    if (typeof body[f] !== 'boolean') throw new HttpError(400, 'That setting is on or off.');
+    out[f] = body[f];
   }
   return out;
 }
@@ -83,6 +97,8 @@ export async function savePrefs(request, env, p, xp) {
     if (upd.keys === null) delete next.keys;
     else next.keys = upd.keys;
   }
+  if (upd.text !== undefined) next.text = upd.text;
+  for (const f of COMFORT_FLAGS) if (upd[f] !== undefined) next[f] = upd[f];
   try {
     await env.DB.prepare('INSERT INTO pupil_prefs (pupil_id, prefs, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(pupil_id) DO UPDATE SET prefs = ?2, updated_at = ?3').bind(p.id, JSON.stringify(next), Date.now()).run();
   } catch {

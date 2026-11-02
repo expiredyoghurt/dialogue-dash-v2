@@ -69,7 +69,12 @@ export async function loadWho(env, payload) {
   const t = await env.DB.prepare('SELECT id, name, active, sess_ver FROM teachers WHERE id = ?1').bind(payload.tid).first();
   if (!t || !t.active || t.sess_ver !== (payload.sv || 0)) return null;
   const rows = (await env.DB.prepare('SELECT class_id FROM teacher_classes WHERE teacher_id = ?1').bind(t.id).all()).results || [];
-  return { admin: false, id: t.id, name: t.name, classes: new Set(rows.map((r) => r.class_id)) };
+  let mustChange = false;
+  try {
+    const f = await env.DB.prepare('SELECT must_change FROM teacher_flags WHERE teacher_id = ?1').bind(t.id).first();
+    mustChange = !!(f && f.must_change);
+  } catch {} // not migrated yet: nobody is forced to change
+  return { admin: false, id: t.id, name: t.name, classes: new Set(rows.map((r) => r.class_id)), mustChange };
 }
 
 // ---------- the admin's account screen ----------
@@ -83,7 +88,17 @@ async function accountRows(env) {
   ]);
   const by = new Map();
   for (const l of links.results || []) by.set(l.teacher_id, [...(by.get(l.teacher_id) || []), l.class_id]);
-  return (ts.results || []).map((t) => ({ ...t, active: !!t.active, classes: by.get(t.id) || [] }));
+  let must = new Set();
+  try {
+    must = new Set(((await env.DB.prepare('SELECT teacher_id FROM teacher_flags WHERE must_change = 1').all()).results || []).map((r) => r.teacher_id));
+  } catch {}
+  return (ts.results || []).map((t) => ({ ...t, active: !!t.active, mustChange: must.has(t.id), classes: by.get(t.id) || [] }));
+}
+
+async function setMustChange(env, id, on) {
+  try {
+    await env.DB.prepare('INSERT INTO teacher_flags (teacher_id, must_change) VALUES (?1, ?2) ON CONFLICT(teacher_id) DO UPDATE SET must_change = ?2').bind(id, on ? 1 : 0).run();
+  } catch {} // not migrated yet
 }
 
 export async function listTeachers(env) {
@@ -121,7 +136,8 @@ export async function createTeacher(request, env) {
   }
   const classes = await validClassIds(env, body.classes);
   if (classes.length) await writeClasses(env, row.id, classes);
-  return json({ teacher: { ...row, active: true, classes }, password });
+  await setMustChange(env, row.id, true);
+  return json({ teacher: { ...row, active: true, mustChange: true, classes }, password });
 }
 
 export async function updateTeacher(request, env, id) {
@@ -147,6 +163,7 @@ export async function resetTeacherPassword(env, id) {
   const password = newPassword();
   const { salt, hash } = await hashPassword(password);
   await env.DB.prepare('UPDATE teachers SET pass_salt = ?1, pass_hash = ?2, sess_ver = sess_ver + 1 WHERE id = ?3').bind(salt, hash, id).run();
+  await setMustChange(env, id, true);
   return json({ password });
 }
 
@@ -169,12 +186,14 @@ export async function changeOwnPassword(request, env, who) {
   const next = clip(body.next, 200);
   if (next.length < 8) throw new HttpError(400, 'Use at least 8 characters for the new password.');
   const { salt, hash } = await hashPassword(next);
+  if (next === clip(body.current, 200)) throw new HttpError(400, 'Choose a password that is different from the one you have now.');
   await env.DB.prepare('UPDATE teachers SET pass_salt = ?1, pass_hash = ?2 WHERE id = ?3').bind(salt, hash, who.id).run();
+  await setMustChange(env, who.id, false);
   return json({ ok: true });
 }
 
 // What the console needs to know about the signed-in person.
 export async function whoAmI(env, who) {
   if (who.admin) return json({ admin: true, name: 'Admin', classes: null });
-  return json({ admin: false, name: who.name, classes: [...who.classes] });
+  return json({ admin: false, name: who.name, classes: [...who.classes], mustChange: !!who.mustChange });
 }
